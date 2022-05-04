@@ -1,0 +1,257 @@
+{
+  "openrpc": "1.2.6",
+  "info": {
+    "title": "test_old",
+    "version": "v0.0.0-b35e0598ad2f7ebd89ac036e29113f0f"
+  },
+  "servers": [
+    {
+      "url": "http://localhost/",
+      "name": "localhost"
+    }
+  ],
+  "methods": [
+    {
+      "name": "check.RemovedMethod",
+      "summary": "Should break if this method is removed",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      },
+      "errors": []
+    },
+    {
+      "name": "check.UpdatedMethod",
+      "summary": "Should not break if method's summary updated",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      },
+      "errors": []
+    },
+    {
+      "name": "check.UntouchedMethod",
+      "summary": "Should list this untouched method",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      },
+      "errors": []
+    },
+    {
+      "name": "check.AddRequiredParam",
+      "summary": "Should break if required parameter id added",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [
+        {
+          "name": "param1",
+          "schema": {
+            "type": "integer"
+          },
+          "required": false
+        }
+      ],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      },
+      "errors": []
+    },
+    {
+      "name": "check.AddNotRequiredParam",
+      "summary": "Should not break if not required parameter is added",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [
+        {
+          "name": "param1",
+          "schema": {
+            "type": "integer"
+          },
+          "required": true
+        }
+      ],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      },
+      "errors": []
+    },
+    {
+      "name": "check.RemoveParam",
+      "summary": "Should not break if parameter is removed",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [
+        {
+          "name": "param1",
+          "schema": {
+            "type": "integer"
+          },
+          "required": true
+        }
+      ],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      },
+      "errors": []
+    },
+    {
+      "name": "check.ChangeTypeParam",
+      "summary": "Should break if param type changed",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [
+        {
+          "name": "param1",
+          "schema": {
+            "type": "string"
+          },
+          "required": true
+        }
+      ],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      },
+      "errors": []
+    },
+    {
+      "name": "check.ChangeReturnType",
+      "summary": "Should break if return type changed",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [
+        {
+          "name": "param1",
+          "schema": {
+            "type": "string"
+          },
+          "required": true
+        }
+      ],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      },
+      "errors": []
+    },
+    {
+      "name": "check.ErrorAdded",
+      "summary": "Should break if new error added",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [
+        {
+          "name": "param1",
+          "schema": {
+            "type": "string"
+          },
+          "required": true
+        }
+      ],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      },
+      "errors": [
+        {
+          "code": 404,
+          "message": "not found"
+        }
+      ]
+    },
+    {
+      "name": "check.ErrorRemoved",
+      "summary": "Should not break if error removed",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [
+        {
+          "name": "param1",
+          "schema": {
+            "type": "string"
+          },
+          "required": true
+        }
+      ],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      },
+      "errors": [
+        {
+          "code": 404,
+          "message": "not found"
+        },
+        {
+          "code": 502,
+          "message": "internal error"
+        }
+      ]
+    }
+  ],
+  "components": {
+    "contentDescriptors": {
+      "BooleanResponse": {
+        "name": "BooleanResponse",
+        "summary": "boolean response",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "IntegerResponse": {
+        "name": "IntegerResponse",
+        "summary": "integer response",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "NullResponse": {
+        "name": "NullResponse",
+        "summary": "null response",
+        "schema": {
+          "type": "null"
+        }
+      },
+      "NumberResponse": {
+        "name": "NumberResponse",
+        "summary": "number response",
+        "schema": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}
