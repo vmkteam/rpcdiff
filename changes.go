@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/thoas/go-funk"
 	"io/ioutil"
 	"reflect"
 	"strings"
@@ -173,23 +174,50 @@ type Change struct {
 }
 
 func (c *Change) String() string {
-	element := last(c.Path)
-	path := ""
-	if len(c.Path) > 1 {
-		path = fmt.Sprintf("at %s", strings.Join(c.Path[:len(c.Path)-1], "\\"))
-	}
-
 	from, _ := json.Marshal(c.From)
 	to, _ := json.Marshal(c.To)
 
 	switch c.Type {
 	case Added:
-		return fmt.Sprintf("added %s %s: %s", element, path, to)
+		return fmt.Sprintf("added %s: %s", stringPath(c.Path), to)
 	case Removed:
-		return fmt.Sprintf("removed %s %s: %s", element, path, from)
+		return fmt.Sprintf("removed %s: %s", stringPath(c.Path), from)
 	default:
-		return fmt.Sprintf("changed %s %s from %s to %s", element, path, from, to)
+		return fmt.Sprintf("changed %s from %s to %s", stringPath(c.Path), from, to)
 	}
+}
+
+func stringPath(path []string) string {
+	if len(path) == 1 {
+		return path[0]
+	}
+
+	section, path := shift(path)
+	element, path := pop(path)
+	middle := ""
+	if len(path) != 0 {
+		middle = fmt.Sprintf(": %s", strings.Join(path, "."))
+	}
+
+	switch section {
+	// special path print for methods
+	case "methods":
+		if contains(path, "params") {
+			if last(path) == "params" {
+				element = fmt.Sprintf("%s param", element)
+				middle = fmt.Sprintf(": %s", path[0])
+			}
+			if len(path) > 2 {
+				middle = fmt.Sprintf(": %s(%s)", path[0], path[2])
+			}
+		}
+		if last(path) == "errors" {
+			element = fmt.Sprintf("%s error", element)
+			middle = fmt.Sprintf(": %s", path[0])
+		}
+	}
+
+	return fmt.Sprintf("%s at %s%s", element, section, middle)
 }
 
 type Diff struct {
@@ -494,7 +522,7 @@ func typeCompare(object ChangeObject) comparerFunc {
 func paramsCompare(path []string, from, to interface{}) *Change {
 	if last(path) == "required" {
 		level := NonBreaking
-		if isNil(from) || !isTrue(to) {
+		if !isTrue(from) && isTrue(to) {
 			level = Breaking
 		}
 
@@ -658,4 +686,22 @@ func last(path []string) string {
 		return path[len(path)-1]
 	}
 	return ""
+}
+
+func contains(path []string, elements ...string) bool {
+	for _, elem := range elements {
+		if !funk.ContainsString(path, elem) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func shift(path []string) (string, []string) {
+	return path[0], path[1:]
+}
+
+func pop(path []string) (string, []string) {
+	return path[len(path)-1], path[:len(path)-1]
 }

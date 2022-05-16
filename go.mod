@@ -5,6 +5,7 @@ go 1.17
 require (
 	github.com/fatih/structs v1.1.0
 	github.com/spf13/cobra v1.4.0
+	github.com/thoas/go-funk v0.6.0
 	github.com/vmkteam/meta-schema/v2 v2.0.0
 	github.com/vmkteam/zenrpc/v2 v2.2.6
 )
