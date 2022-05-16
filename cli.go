@@ -8,8 +8,9 @@ import (
 
 func main() {
 	var (
-		old string
-		new string
+		old  string
+		new  string
+		opts Options
 	)
 
 	command := &cobra.Command{
@@ -20,7 +21,7 @@ func main() {
 			UnknownFlags: true,
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			diff, err := NewDiff(old, new)
+			diff, err := NewDiff(old, new, opts)
 			if err != nil {
 				fmt.Println(err)
 				return
@@ -38,6 +39,8 @@ func main() {
 
 	flags.StringVarP(&new, "new", "n", "", "path/url to new schema")
 	cobra.MarkFlagRequired(flags, "new")
+
+	flags.BoolVar(&opts.ShowMeta, "compare-meta", false, "true to compare schema meta info")
 
 	command.Execute()
 }

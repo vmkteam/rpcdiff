@@ -225,9 +225,14 @@ func stringPath(path []string) string {
 type Diff struct {
 	Criticality CriticalityLevel
 	Changes     []Change
+	Options     Options
 }
 
-func NewDiff(old, new string) (*Diff, error) {
+type Options struct {
+	ShowMeta bool
+}
+
+func NewDiff(old, new string, options Options) (*Diff, error) {
 	oldBytes, err := readFileOrUrl(old)
 	if err != nil {
 		return nil, fmt.Errorf("read old schema error: %w", err)
@@ -238,7 +243,7 @@ func NewDiff(old, new string) (*Diff, error) {
 		return nil, fmt.Errorf("read new schema error: %w", err)
 	}
 
-	return NewDiffBytes(oldBytes, newBytes)
+	return NewDiffBytes(oldBytes, newBytes, options)
 }
 
 func readFileOrUrl(path string) ([]byte, error) {
@@ -259,7 +264,7 @@ func readFileOrUrl(path string) ([]byte, error) {
 	return []byte{}, nil
 }
 
-func NewDiffBytes(oldJSON, newJSON []byte) (*Diff, error) {
+func NewDiffBytes(oldJSON, newJSON []byte, options Options) (*Diff, error) {
 	var oldSchema openrpc.OpenrpcDocument
 	if err := json.Unmarshal(oldJSON, &oldSchema); err != nil {
 		return nil, err
@@ -273,6 +278,7 @@ func NewDiffBytes(oldJSON, newJSON []byte) (*Diff, error) {
 	diff := &Diff{
 		Criticality: NonBreaking,
 		Changes:     []Change{},
+		Options:     options,
 	}
 
 	compareRecursive(diff)(oldSchema, newSchema, []string{})
@@ -322,6 +328,10 @@ func (d *Diff) String() string {
 
 func compareRecursive(diff *Diff) func(old, new interface{}, path []string) {
 	return func(old, new interface{}, path []string) {
+		if !diff.Options.ShowMeta && (matchPath(path, "info") || matchPath(path, "servers")) {
+			return
+		}
+
 		if !sameType(old, new) {
 			diff.Changes = append(diff.Changes, *compare(path, old, new))
 		}
@@ -526,13 +536,26 @@ func openrpcCompare(path []string, from, to interface{}) *Change {
 
 func typeCompare(object ChangeObject) comparerFunc {
 	return func(path []string, from, to interface{}) *Change {
-		// TODO advanced type comparison
-
 		change := plainCompare(object)(path, from, to)
 		change.Criticality = Breaking
+		if last(path) == "type" {
+			change.Criticality = simpleTypeCompare(from, to)
+		}
 
 		return change
 	}
+}
+
+func simpleTypeCompare(from, to interface{}) CriticalityLevel {
+	if fs, ok := from.(openrpc.SimpleType); ok {
+		if ts, ok := to.(openrpc.SimpleType); ok {
+			if fs == "integer" && ts == "number" {
+				return NonBreaking
+			}
+		}
+	}
+
+	return Breaking
 }
 
 func paramsCompare(path []string, from, to interface{}) *Change {

@@ -12,7 +12,7 @@ func TestNewDiff(t *testing.T) {
 	rpc := zenrpc.NewServer(zenrpc.Options{})
 	rpc.Register("arith", testdata.ArithService{})
 
-	diff, err := NewDiff("testdata/openrpc_old.json", "testdata/openrpc_new.json")
+	diff, err := NewDiff("testdata/openrpc_old.json", "testdata/openrpc_new.json", Options{})
 
 	if err != nil {
 		t.Fatalf("new diff error: %s", err)
