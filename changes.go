@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"github.com/thoas/go-funk"
 	"io/ioutil"
+	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 
@@ -225,7 +227,39 @@ type Diff struct {
 	Changes     []Change
 }
 
-func NewDiff(oldJSON, newJSON []byte) (*Diff, error) {
+func NewDiff(old, new string) (*Diff, error) {
+	oldBytes, err := readFileOrUrl(old)
+	if err != nil {
+		return nil, fmt.Errorf("read old schema error: %w", err)
+	}
+
+	newBytes, err := readFileOrUrl(new)
+	if err != nil {
+		return nil, fmt.Errorf("read new schema error: %w", err)
+	}
+
+	return NewDiffBytes(oldBytes, newBytes)
+}
+
+func readFileOrUrl(path string) ([]byte, error) {
+	if _, err := url.ParseRequestURI(path); err != nil {
+		return ioutil.ReadFile(path)
+	}
+
+	resp, err := http.Get(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Body != nil {
+		defer resp.Body.Close()
+		return ioutil.ReadAll(resp.Body)
+	}
+
+	return []byte{}, nil
+}
+
+func NewDiffBytes(oldJSON, newJSON []byte) (*Diff, error) {
 	var oldSchema openrpc.OpenrpcDocument
 	if err := json.Unmarshal(oldJSON, &oldSchema); err != nil {
 		return nil, err
@@ -254,24 +288,6 @@ func NewDiff(oldJSON, newJSON []byte) (*Diff, error) {
 	}
 
 	return diff, nil
-}
-
-func NewDiffFiles(oldFilename, newFilename string) (*Diff, error) {
-	oldJSON, err := ioutil.ReadFile(oldFilename)
-	if err != nil {
-		return nil, fmt.Errorf("read old json schema error: %w", err)
-	}
-
-	newJSON, err := ioutil.ReadFile(newFilename)
-	if err != nil {
-		return nil, fmt.Errorf("read new json schema error: %w", err)
-	}
-
-	return NewDiff(oldJSON, newJSON)
-}
-
-func NewDiffStrings(oldJSON, newJSON string) (*Diff, error) {
-	return NewDiff([]byte(oldJSON), []byte(newJSON))
 }
 
 func (d *Diff) String() string {

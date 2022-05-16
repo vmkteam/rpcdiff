@@ -20,7 +20,7 @@ func main() {
 			UnknownFlags: true,
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			diff, err := NewDiffFiles(old, new)
+			diff, err := NewDiff(old, new)
 			if err != nil {
 				fmt.Println(err)
 				return
@@ -33,10 +33,10 @@ func main() {
 	flags := command.Flags()
 	flags.SortFlags = false
 
-	flags.StringVarP(&old, "old", "o", "", "path to old schema file")
+	flags.StringVarP(&old, "old", "o", "", "path/url to old schema")
 	cobra.MarkFlagRequired(flags, "old")
 
-	flags.StringVarP(&new, "new", "n", "", "path to new schema file")
+	flags.StringVarP(&new, "new", "n", "", "path/url to new schema")
 	cobra.MarkFlagRequired(flags, "new")
 
 	command.Execute()
