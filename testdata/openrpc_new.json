@@ -277,6 +277,61 @@
             "type": "string"
           }
         }
+      },
+      "NewReqProp": {
+        "required": [
+          "prop1",
+          "prop2"
+        ],
+        "properties": {
+          "prop1": {
+            "type": "string"
+          },
+          "prop2": {
+            "type": "string"
+          }
+        }
+      },
+      "ExReqProp": {
+        "required": [
+          "prop1",
+          "prop2"
+        ],
+        "properties": {
+          "prop1": {
+            "type": "string"
+          },
+          "prop2": {
+            "type": "string"
+          }
+        }
+      },
+      "ChangeIntPropType": {
+        "properties": {
+          "prop1": {
+            "type": "float"
+          }
+        }
+      },
+      "RemovedProp": {
+        "properties": {
+          "prop1": {
+            "type": "string"
+          }
+        }
+      },
+      "RemovedPropFromReq": {
+        "required": [
+          "prop1"
+        ],
+        "properties": {
+          "prop1": {
+            "type": "string"
+          },
+          "prop2": {
+            "type": "string"
+          }
+        }
       }
     },
     "contentDescriptors": {

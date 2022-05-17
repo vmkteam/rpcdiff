@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/fatih/structs"
@@ -138,6 +139,10 @@ var changePaths = []changePath{
 		comp:    strictCompare(Method),
 	},
 	{
+		pattern: "components.schemas.*.required",
+		comp:    schemaRequiredCompare,
+	},
+	{
 		pattern: "components.schemas.*.properties.*.*",
 		comp:    schemaPropertyCompare,
 	},
@@ -179,29 +184,44 @@ func (c *Change) String() string {
 	from, _ := json.Marshal(c.From)
 	to, _ := json.Marshal(c.To)
 
+	element, section, stringPath := stringPath(c.Path)
+	if stringPath != "" {
+		stringPath = fmt.Sprintf(": %s", stringPath)
+	}
+
 	switch c.Type {
 	case Added:
-		return fmt.Sprintf("added %s: %s", stringPath(c.Path), to)
+		if _, err := strconv.Atoi(element); err == nil {
+			return fmt.Sprintf("added %s to %s%s", to, section, stringPath)
+		}
+
+		return fmt.Sprintf("added %s to %s%s: %s", element, section, stringPath, to)
 	case Removed:
-		return fmt.Sprintf("removed %s: %s", stringPath(c.Path), from)
+		if _, err := strconv.Atoi(element); err == nil {
+			return fmt.Sprintf("removed %s from %s%s", from, section, stringPath)
+		}
+
+		return fmt.Sprintf("removed %s from %s%s: %s", element, section, stringPath, from)
 	default:
-		return fmt.Sprintf("changed %s from %s to %s", stringPath(c.Path), from, to)
+		return fmt.Sprintf("changed %s at %s%s: from %s to %s", element, section, stringPath, from, to)
 	}
 }
 
-func stringPath(path []string) string {
+func stringPath(path []string) (element, section, stringPath string) {
 	if len(path) == 0 {
-		return ""
+		return
 	}
 	if len(path) == 1 {
-		return path[0]
+		stringPath = path[0]
+		return
 	}
 
-	section, path := shift(path)
-	element, path := pop(path)
-	middle := ""
+	section, path = shift(path)
+	element, path = pop(path)
+	stringPath = ""
+
 	if len(path) != 0 {
-		middle = fmt.Sprintf(": %s", strings.Join(path, "."))
+		stringPath = strings.Join(path, ".")
 	}
 
 	switch section {
@@ -210,19 +230,19 @@ func stringPath(path []string) string {
 		if contains(path, "params") {
 			if last(path) == "params" {
 				element = fmt.Sprintf("%s param", element)
-				middle = fmt.Sprintf(": %s", path[0])
+				stringPath = path[0]
 			}
 			if len(path) > 2 {
-				middle = fmt.Sprintf(": %s(%s)", path[0], path[2])
+				stringPath = fmt.Sprintf("%s(%s)", path[0], path[2])
 			}
 		}
 		if last(path) == "errors" {
 			element = fmt.Sprintf("%s error", element)
-			middle = fmt.Sprintf(": %s", path[0])
+			stringPath = path[0]
 		}
 	}
 
-	return fmt.Sprintf("%s at %s%s", element, section, middle)
+	return
 }
 
 type Diff struct {
@@ -273,14 +293,10 @@ func NewDiffBytes(oldJSON, newJSON []byte, options Options) (*Diff, error) {
 		return nil, err
 	}
 
-	//spew.Dump(oldSchema)
-
 	var newSchema openrpc.OpenrpcDocument
 	if err := json.Unmarshal(newJSON, &newSchema); err != nil {
 		return nil, err
 	}
-
-	//spew.Dump(newSchema)
 
 	diff := &Diff{
 		Criticality: NonBreaking,
@@ -562,7 +578,7 @@ func typeCompare(object ChangeObject) comparerFunc {
 func simpleTypeCompare(from, to interface{}) CriticalityLevel {
 	if fs, ok := from.(openrpc.SimpleType); ok {
 		if ts, ok := to.(openrpc.SimpleType); ok {
-			if fs == "integer" && ts == "number" {
+			if (fs == "integer" || fs == "int") && (ts == "number" || ts == "float") {
 				return NonBreaking
 			}
 		}
@@ -661,14 +677,31 @@ func methodErrorCompare(path []string, from, to interface{}) *Change {
 	return change
 }
 
+func schemaRequiredCompare(path []string, from, to interface{}) *Change {
+	change := strictCompare(ComponentsSchemaPropertyType)(path, from, to)
+
+	switch change.Type {
+	case Added:
+		change.Criticality = Breaking
+	default:
+		change.Criticality = NonBreaking
+	}
+
+	return change
+}
+
 func schemaPropertyCompare(path []string, from, to interface{}) *Change {
 	// description is changed
 	if last(path) == "description" {
 		return plainCompare(ComponentsSchemaPropertyDesc)(path, from, to)
 	}
 
-	// TODO make different comparison for output objects an input objects
-	return strictCompare(ComponentsSchemaPropertyType)(path, from, to)
+	change := strictCompare(ComponentsSchemaPropertyType)(path, from, to)
+	if last(path) == "type" {
+		change.Criticality = simpleTypeCompare(from, to)
+	}
+
+	return change
 }
 
 func schemaDescriptorCompare(path []string, from, to interface{}) *Change {
