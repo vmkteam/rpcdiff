@@ -2,7 +2,7 @@
   "openrpc": "1.2.6",
   "info": {
     "title": "test_old",
-    "version": "v0.0.0-b35e0598ad2f7ebd89ac036e29113f0f"
+    "version": "v0.0.0-b35e0598ad2f7ebd89ac036e29113f0a"
   },
   "servers": [
     {
@@ -226,9 +226,59 @@
           "message": "not found"
         }
       ]
+    },
+    {
+      "name": "check.SchemaUpdated",
+      "summary": "Should break if changed schema prop type / add new required param / add exiting param to required",
+      "tags": [
+        {
+          "name": "check"
+        }
+      ],
+      "params": [
+        {
+          "name": "param1",
+          "summary": "ChangePropType",
+          "schema": {
+            "$ref": "#/components/schemas/ChangePropType"
+          },
+          "required": true
+        },
+        {
+          "name": "param2",
+          "summary": "NewReqProp",
+          "schema": {
+            "$ref": "#/components/schemas/NewReqProp"
+          },
+          "required": true
+        },
+        {
+          "name": "param3",
+          "summary": "ExReqProp",
+          "schema": {
+            "$ref": "#/components/schemas/ExReqProp"
+          },
+          "required": true
+        }
+      ],
+      "result": {
+        "$ref": "#/components/contentDescriptors/NullResponse"
+      }
     }
   ],
   "components": {
+    "schemas": {
+      "ChangePropType": {
+        "required": [
+          "prop1"
+        ],
+        "properties": {
+          "prop": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "contentDescriptors": {
       "BooleanResponse": {
         "name": "BooleanResponse",

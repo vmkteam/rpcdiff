@@ -190,6 +190,9 @@ func (c *Change) String() string {
 }
 
 func stringPath(path []string) string {
+	if len(path) == 0 {
+		return ""
+	}
 	if len(path) == 1 {
 		return path[0]
 	}
@@ -223,9 +226,9 @@ func stringPath(path []string) string {
 }
 
 type Diff struct {
-	Criticality CriticalityLevel
-	Changes     []Change
-	Options     Options
+	Criticality CriticalityLevel `json:"criticality"`
+	Changes     []Change         `json:"changes"`
+	Options     Options          `json:"-"`
 }
 
 type Options struct {
@@ -270,10 +273,14 @@ func NewDiffBytes(oldJSON, newJSON []byte, options Options) (*Diff, error) {
 		return nil, err
 	}
 
+	//spew.Dump(oldSchema)
+
 	var newSchema openrpc.OpenrpcDocument
 	if err := json.Unmarshal(newJSON, &newSchema); err != nil {
 		return nil, err
 	}
+
+	//spew.Dump(newSchema)
 
 	diff := &Diff{
 		Criticality: NonBreaking,
@@ -327,10 +334,14 @@ func (d *Diff) String() string {
 }
 
 func compareRecursive(diff *Diff) func(old, new interface{}, path []string) {
-	return func(old, new interface{}, path []string) {
-		if !diff.Options.ShowMeta && (matchPath(path, "info") || matchPath(path, "servers")) {
+	return func(old, new interface{}, p []string) {
+		if !diff.Options.ShowMeta && (matchPath(p, "info") || matchPath(p, "servers")) {
 			return
 		}
+
+		// copy path to avoid path rewrite
+		path := make([]string, len(p))
+		copy(path, p)
 
 		if !sameType(old, new) {
 			diff.Changes = append(diff.Changes, *compare(path, old, new))
@@ -342,6 +353,8 @@ func compareRecursive(diff *Diff) func(old, new interface{}, path []string) {
 				if change := compare(path, oldE, newE); change != nil {
 					diff.Changes = append(diff.Changes, *change)
 				}
+
+				return
 			}
 		}
 
