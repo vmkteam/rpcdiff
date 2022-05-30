@@ -50,139 +50,45 @@ const (
 	OpenRPCVersion ChangeObject = "OPEN_RPC_VERSION"
 
 	SchemaInfo    ChangeObject = "SCHEMA_INFO"
-	SchemaVersion ChangeObject = "SCHEMA_VERSION"
 	SchemaServers ChangeObject = "SCHEMA_SERVERS"
 
 	Method               ChangeObject = "METHOD"
-	MethodTags           ChangeObject = "METHOD_TAGS"
-	MethodSummary        ChangeObject = "METHOD_SUMMARY"
 	MethodParamStructure ChangeObject = "METHOD_PARAM_STRUCTURE"
 
-	MethodParam         ChangeObject = "METHOD_PARAM"
-	MethodParamRequired ChangeObject = "METHOD_PARAM_REQUIRED"
-	MethodParamType     ChangeObject = "METHOD_PARAM_TYPE" // type + ref + items type + items ref
-	MethodParamDesc     ChangeObject = "METHOD_PARAM_DESC"
+	MethodParam     ChangeObject = "METHOD_PARAM"
+	MethodParamType ChangeObject = "METHOD_PARAM_TYPE" // type + ref + items type + items ref
 
-	MethodResultName ChangeObject = "METHOD_RESULT"
-	MethodResultDesc ChangeObject = "METHOD_RESULT_DESC"
+	MethodResult     ChangeObject = "METHOD_RESULT"
 	MethodResultType ChangeObject = "METHOD_RESULT_TYPE" // schema type + ref
 
-	MethodError        ChangeObject = "METHOD_ERROR"
-	MethodErrorMessage ChangeObject = "METHOD_ERROR_MSG"
+	MethodError ChangeObject = "METHOD_ERROR"
 
 	ComponentsSchema             ChangeObject = "COMPONENTS_SCHEMA"
+	ComponentsSchemaType         ChangeObject = "COMPONENTS_SCHEMA_TYPE"
 	ComponentsSchemaProperty     ChangeObject = "COMPONENTS_SCHEMA_PROPERTY"
-	ComponentsSchemaPropertyDesc ChangeObject = "COMPONENTS_SCHEMA_PROPERTY_REQUIRED"
 	ComponentsSchemaPropertyType ChangeObject = "COMPONENTS_SCHEMA_PROPERTY_TYPE" // type + ref + items type + items ref
 
-	ComponentsDescriptor        ChangeObject = "COMPONENTS_DESCRIPTOR"
-	ComponentsDescriptorSummary ChangeObject = "COMPONENTS_DESCRIPTOR_SUMMARY"
-	ComponentsDescriptorType    ChangeObject = "COMPONENTS_DESCRIPTOR_TYPE"
+	ComponentsDescriptor     ChangeObject = "COMPONENTS_DESCRIPTOR"
+	ComponentsDescriptorType ChangeObject = "COMPONENTS_DESCRIPTOR_TYPE"
 
 	Other ChangeObject = "OTHER"
 )
-
-type comparerFunc func(path []string, from, to interface{}) *Change
-
-type changePath struct {
-	pattern string
-	comp    comparerFunc
-}
-
-var changePaths = []changePath{
-	{
-		pattern: "openrpc",
-		comp:    openrpcCompare,
-	},
-	{
-		pattern: "info.version",
-		comp:    plainCompare(SchemaVersion),
-	},
-	{
-		pattern: "info",
-		comp:    plainCompare(SchemaInfo),
-	},
-	{
-		pattern: "servers",
-		comp:    plainCompare(SchemaServers),
-	},
-	{
-		pattern: "methods.*.params.*.schema",
-		comp:    typeCompare(MethodParamType),
-	},
-	{
-		pattern: "methods.*.params",
-		comp:    paramsCompare,
-	},
-	{
-		pattern: "methods.*.paramsStructure",
-		comp:    paramStructureCompare,
-	},
-	{
-		pattern: "methods.*.tags",
-		comp:    plainCompare(MethodTags),
-	},
-	{
-		pattern: "methods.*.summary",
-		comp:    plainCompare(MethodSummary),
-	},
-	{
-		pattern: "methods.*.result",
-		comp:    methodResultCompare,
-	},
-	{
-		pattern: "methods.*.errors",
-		comp:    methodErrorCompare,
-	},
-	{
-		pattern: "methods",
-		comp:    strictCompare(Method),
-	},
-	{
-		pattern: "components.schemas.*.required",
-		comp:    schemaRequiredCompare,
-	},
-	{
-		pattern: "components.schemas.*.properties.*.*",
-		comp:    schemaPropertyCompare,
-	},
-	{
-		pattern: "components.schemas.*.properties.*",
-		comp:    plainCompare(ComponentsSchemaProperty),
-	},
-	{
-		pattern: "components.schemas",
-		comp:    strictCompare(ComponentsSchema),
-	},
-	{
-		pattern: "components.contentDescriptors.*.*",
-		comp:    schemaDescriptorCompare,
-	},
-	{
-		pattern: "components.contentDescriptors.*",
-		comp:    plainCompare(ComponentsDescriptor),
-	},
-	{
-		pattern: "components.contentDescriptors",
-		comp:    strictCompare(ComponentsSchema),
-	},
-}
 
 type Change struct {
 	Path        []string         `json:"path"`
 	Type        ChangeType       `json:"type"`
 	Object      ChangeObject     `json:"object"`
 	Criticality CriticalityLevel `json:"criticality"`
-	From        interface{}
-	To          interface{}
+	Old         interface{}
+	New         interface{}
 
 	// TODO Add related paths to definitions/schemas diffs
 	//Related     []string `json:"related"`
 }
 
 func (c *Change) String() string {
-	from, _ := json.Marshal(c.From)
-	to, _ := json.Marshal(c.To)
+	from, _ := json.Marshal(c.Old)
+	to, _ := json.Marshal(c.New)
 
 	element, section, stringPath := stringPath(c.Path)
 	if stringPath != "" {
@@ -300,11 +206,10 @@ func NewDiffBytes(oldJSON, newJSON []byte, options Options) (*Diff, error) {
 
 	diff := &Diff{
 		Criticality: NonBreaking,
-		Changes:     []Change{},
 		Options:     options,
 	}
 
-	compareRecursive(diff)(oldSchema, newSchema, []string{})
+	diff.Changes = compareDocument(options, &oldSchema, &newSchema)
 
 	for _, c := range diff.Changes {
 		if c.Criticality == Dangerous {
@@ -349,56 +254,553 @@ func (d *Diff) String() string {
 	return buf.String()
 }
 
-func compareRecursive(diff *Diff) func(old, new interface{}, path []string) {
-	return func(old, new interface{}, p []string) {
-		if !diff.Options.ShowMeta && (matchPath(p, "info") || matchPath(p, "servers")) {
-			return
-		}
+// compareDocument compares two openrpc documents recursively
+func compareDocument(options Options, old, new *openrpc.OpenrpcDocument) []Change {
+	var changes []Change
 
-		// copy path to avoid path rewrite
-		path := make([]string, len(p))
-		copy(path, p)
+	// openrpc version
+	if change := compare(old.Openrpc, new.Openrpc, []string{"openrpc"}, Breaking); change != nil {
+		changes = append(changes, *change)
+	}
 
-		if !sameType(old, new) {
-			diff.Changes = append(diff.Changes, *compare(path, old, new))
-		}
+	// info object
+	changes = append(changes, compareInfo(options, old.Info, new.Info)...)
 
-		// embed simple types
-		if okOld, oldE := getEmbedSimpleType(old); okOld {
-			if okNew, newE := getEmbedSimpleType(new); okNew {
-				if change := compare(path, oldE, newE); change != nil {
-					diff.Changes = append(diff.Changes, *change)
-				}
+	// servers object
+	changes = append(changes, compareServers(options, old.Servers, new.Servers)...)
 
-				return
-			}
-		}
+	// methods
+	changes = append(changes, compareMethods(options, old.Methods, new.Methods)...)
 
-		if (isStruct(old) && isStruct(new)) || (isMap(old) && isMap(new)) || (isSlice(old) && isSlice(new)) {
-			oldMap := getMap(old)
-			newMap := getMap(new)
+	// components
+	changes = append(changes, compareComponents(options, old, new)...)
 
-			for oldFieldName, oldFieldVal := range oldMap {
-				if newFieldVal, ok := newMap[oldFieldName]; ok {
-					compareRecursive(diff)(oldFieldVal, newFieldVal, append(path, oldFieldName))
+	return changes
+}
 
-					delete(newMap, oldFieldName)
-				} else {
-					diff.Changes = append(diff.Changes, *compare(append(path, oldFieldName), oldFieldVal, nil))
-				}
-			}
+// compareInfo compares info sections recursively
+func compareInfo(options Options, old, new *openrpc.InfoObject) []Change {
+	if !options.ShowMeta {
+		return nil
+	}
 
-			for leftFieldName, leftFieldVal := range newMap {
-				diff.Changes = append(diff.Changes, *compare(append(path, leftFieldName), nil, leftFieldVal))
-			}
+	// basic compare
+	return compareRecursive(old, new, []string{"info"}, nil)
+}
 
-			return
-		}
+// compareServers compares servers sections recursively
+func compareServers(options Options, old, new []openrpc.ServerObject) []Change {
+	if !options.ShowMeta {
+		return nil
+	}
 
-		if change := compare(path, old, new); change != nil {
-			diff.Changes = append(diff.Changes, *change)
+	// basic compare
+	return compareRecursive(old, new, []string{"servers"}, nil)
+}
+
+// compareMethods compares each method with counterpart recursively
+func compareMethods(options Options, old, new []openrpc.MethodOrReference) []Change {
+	var changes []Change
+
+	oldMap := map[string]openrpc.MethodOrReference{}
+	for _, method := range old {
+		oldMap[method.Name] = method
+	}
+
+	newMap := map[string]openrpc.MethodOrReference{}
+	for _, method := range new {
+		newMap[method.Name] = method
+	}
+
+	for oldMethodName, oldMethod := range oldMap {
+		if newMethod, ok := newMap[oldMethodName]; ok {
+			changes = append(changes, compareMethod(options, oldMethod, newMethod, []string{"methods", oldMethodName})...)
+
+			delete(newMap, oldMethodName)
+		} else {
+			// breaking on method delete
+			changes = append(changes, *compare(oldMethod, nil, []string{"methods", oldMethodName}, Breaking))
 		}
 	}
+
+	for newMethodName, newMethod := range newMap {
+		// non-breaking on method add
+		changes = append(changes, *compare(nil, newMethod, []string{"methods", newMethodName}, NonBreaking))
+	}
+
+	return changes
+}
+
+// compareMethod compares two methods recursively
+func compareMethod(options Options, old, new openrpc.MethodOrReference, path []string) []Change {
+	var changes []Change
+
+	// param structure
+	if old.ParamStructure != new.ParamStructure {
+		changes = append(changes, compareParamStructure(old.ParamStructure, new.ParamStructure, append(path, "paramStructure")))
+	}
+
+	// params thyself
+	changes = append(changes, compareMethodParams(options, old.Params, new.Params, append(path, "params"))...)
+
+	// results
+	changes = append(changes, compareMethodResults(options, old.Result, new.Result, append(path, "result"))...)
+
+	// errors
+	changes = append(changes, compareMethodErrors(options, old.Errors, new.Errors, append(path, "errors"))...)
+
+	// rest of the fields
+	changes = append(changes, compareRecursive(old, new, path, []string{"paramStructure", "params", "result", "errors"})...)
+
+	return changes
+}
+
+// compareParamStructure compares two methods' param structure recursively
+func compareParamStructure(old, new openrpc.MethodObjectParamStructure, path []string) Change {
+	var criticality CriticalityLevel
+
+	for {
+		if new == openrpc.MethodObjectParamStructureEnum2 || new == "" {
+			criticality = NonBreaking
+			break
+		}
+
+		if old == openrpc.MethodObjectParamStructureEnum2 || old == "" {
+			criticality = Dangerous
+			break
+		}
+
+		if old != new {
+			criticality = Breaking
+			break
+		}
+		break
+	}
+
+	return Change{
+		Path:        path,
+		Type:        detectChangeType(old, new),
+		Object:      MethodParamStructure,
+		Criticality: criticality,
+		Old:         old,
+		New:         new,
+	}
+}
+
+// compareMethodParams compares params of two methods
+func compareMethodParams(options Options, old, new []openrpc.ContentDescriptorOrReference, path []string) []Change {
+	var changes []Change
+
+	oldMap := map[string]openrpc.ContentDescriptorOrReference{}
+	for _, param := range old {
+		oldMap[param.Name] = param
+	}
+
+	newMap := map[string]openrpc.ContentDescriptorOrReference{}
+	for _, param := range new {
+		newMap[param.Name] = param
+	}
+
+	for oldParamName, oldParam := range oldMap {
+		if newParam, ok := newMap[oldParamName]; ok {
+			changes = append(changes, compareContentDescriptor(options, oldParam, newParam, append(path, oldParamName), true)...)
+
+			delete(newMap, oldParamName)
+		} else {
+			// non-breaking on param delete
+			changes = append(changes, *compare(oldParam, nil, append(path, oldParamName), NonBreaking))
+		}
+	}
+
+	for newParamName, newParam := range newMap {
+		level := NonBreaking
+		if newParam.Required {
+			level = Breaking
+		}
+
+		// non-breaking on method add
+		changes = append(changes, *compare(nil, newParam, append(path, newParamName), level))
+	}
+
+	return changes
+}
+
+// compareType compares type in JSON Schema
+func compareType(options Options, old, new *openrpc.Type, path []string) *Change {
+	if reflect.DeepEqual(old, new) {
+		return nil
+	}
+
+	if old == nil || new == nil {
+		return compare(old, new, path, Breaking)
+	}
+
+	level := Breaking
+	if (old.SimpleType == "integer" || old.SimpleType == "int") && (new.SimpleType == "number" || new.SimpleType == "float") {
+		level = NonBreaking
+	}
+
+	return compare(old.SimpleType, new.SimpleType, path, level)
+}
+
+// compareMethodResults compares results of methods
+func compareMethodResults(options Options, old, new *openrpc.MethodObjectResult, path []string) []Change {
+	if reflect.DeepEqual(old, new) {
+		return nil
+	}
+
+	if old == nil {
+		return []Change{*compare(old, new, path, NonBreaking)}
+	}
+	if new == nil {
+		return []Change{*compare(old, new, path, Breaking)}
+	}
+
+	oldCD := openrpc.ContentDescriptorOrReference{
+		ContentDescriptorObject: old.ContentDescriptorObject,
+		ReferenceObject:         old.ReferenceObject,
+	}
+
+	newCD := openrpc.ContentDescriptorOrReference{
+		ContentDescriptorObject: new.ContentDescriptorObject,
+		ReferenceObject:         new.ReferenceObject,
+	}
+
+	return compareContentDescriptor(options, oldCD, newCD, append(path, "result"), false)
+}
+
+// compareMethodErrors compares errors of methods
+func compareMethodErrors(options Options, old, new []openrpc.ErrorOrReference, path []string) []Change {
+	return compareRecursive(old, new, path, []string{})
+}
+
+// compareComponents compares each component
+func compareComponents(options Options, oldDoc, newDoc *openrpc.OpenrpcDocument) []Change {
+	var changes []Change
+
+	changes = append(changes, compareComponentsSchemas(options, oldDoc.Components.Schemas, newDoc.Components.Schemas, oldDoc, newDoc)...)
+
+	return changes
+}
+
+// compareComponents compares each component
+func compareComponentsSchemas(options Options, old, new *openrpc.SchemaMap, oldDoc, newDoc *openrpc.OpenrpcDocument) []Change {
+	var changes []Change
+
+	path := []string{"components", "schemas"}
+
+	if (old != nil) != (new != nil) {
+		return []Change{*compare(old, new, path, NonBreaking)}
+	}
+
+	if old == nil {
+		old = &openrpc.SchemaMap{}
+	}
+
+	if new == nil {
+		new = &openrpc.SchemaMap{}
+	}
+
+	index := map[string]bool{}
+	for _, oldSchema := range *old {
+		if newSchema, ok := new.Get(oldSchema.Id); ok {
+			isInput := detectRequiredInput(newSchema.Id, newDoc, []string{}, 0)
+
+			changes = append(changes, compareJSONSchema(options, oldSchema, newSchema, append(path, oldSchema.Id), isInput)...)
+
+			index[newSchema.Id] = true
+		} else {
+			changes = append(changes, *compare(oldSchema, nil, append(path, oldSchema.Id), NonBreaking))
+		}
+	}
+
+	for _, newSchema := range *new {
+		if index[newSchema.Id] {
+			continue
+		}
+
+		changes = append(changes, *compare(nil, newSchema, append(path, newSchema.Id), NonBreaking))
+	}
+
+	return changes
+}
+
+func detectRequiredInput(name string, doc *openrpc.OpenrpcDocument, checked []string, level int) bool {
+	if level > 5 {
+		return false
+	}
+
+	ref := fmt.Sprintf("#/components/schemas/%s", name)
+	// for every method
+	for _, method := range doc.Methods {
+		// every param
+		for _, param := range method.Params {
+			// check reference
+			paramRef := ""
+			if param.ReferenceObject != nil {
+				paramRef = param.ReferenceObject.Ref
+			} else if param.ContentDescriptorObject != nil && param.Schema != nil {
+				paramRef = param.Schema.Ref
+			}
+
+			if ref == paramRef && (level == 0 && param.Required || level > 0) {
+				return true
+			}
+		}
+	}
+
+	if doc.Components != nil && doc.Components.Schemas != nil {
+		for _, schema := range *doc.Components.Schemas {
+			if schema.Properties == nil {
+				continue
+			}
+
+			if funk.ContainsString(checked, schema.Id) {
+				continue
+			}
+
+			for _, prop := range *schema.Properties {
+				if prop.Ref == ref && funk.ContainsString(schema.Required, prop.Title) {
+					if detectRequiredInput(schema.Id, doc, append(checked, name), level+1) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// compareContentDescriptor compares any kind of content descriptor
+func compareContentDescriptor(options Options, old, new openrpc.ContentDescriptorOrReference, path []string, isInput bool) []Change {
+	var changes []Change
+
+	// descriptor -> reference
+	if old.ContentDescriptorObject != nil && new.ReferenceObject != nil {
+		return []Change{*compare(old.ContentDescriptorObject, new.ReferenceObject, path, Breaking)}
+	}
+
+	// reference -> descriptor
+	if old.ReferenceObject != nil && new.ContentDescriptorObject != nil {
+		return []Change{*compare(old.ReferenceObject, new.ContentDescriptorObject, path, Breaking)}
+	}
+
+	if change := compareRef(options, old.ReferenceObject, new.ReferenceObject, append(path, "$ref")); change != nil {
+		return []Change{*change}
+	}
+
+	// required
+	if old.Required != new.Required {
+		level := NonBreaking
+		if new.Required {
+			level = Breaking
+		}
+
+		changes = append(changes, *compare(old.Required, new.Required, append(path, "required"), level))
+	}
+
+	// schema
+	changes = append(changes, compareJSONSchema(options, *old.Schema, *new.Schema, append(path, "schema"), isInput)...)
+
+	// summary
+	if old.Summary != new.Summary {
+		changes = append(changes, *compare(old.Summary, new.Summary, append(path, "summary"), NonBreaking))
+	}
+
+	// description
+	if old.Description != new.Description {
+		changes = append(changes, *compare(old.Description, new.Description, append(path, "description"), NonBreaking))
+	}
+
+	return changes
+}
+
+// compareJSONSchema compares any kind of json schema
+func compareJSONSchema(options Options, old, new openrpc.JSONSchema, path []string, isInput bool) []Change {
+	var changes []Change
+
+	if reflect.DeepEqual(old, new) {
+		return nil
+	}
+
+	// reference -> schema or schema -> reference
+	if (old.Ref != "") != (new.Ref != "") {
+		return []Change{*compare(old, new, path, Breaking)}
+	}
+
+	if change := compareRef(options, old.Ref, new.Ref, append(path, "$ref")); change != nil {
+		return []Change{*change}
+	}
+
+	// type
+	if change := compareType(options, old.Type, new.Type, append(path, "type")); change != nil {
+		changes = append(changes, *change)
+	}
+
+	// items
+	if !reflect.DeepEqual(old.Items, new.Items) {
+		if old.Items != nil && new.Items != nil {
+			changes = append(changes, compareJSONSchema(options, *old.Items.JSONSchema, *new.Items.JSONSchema, append(path, "items"), isInput)...)
+		} else if old.Items == nil {
+			changes = append(changes, *compare(nil, new.Items, append(path, "items"), Breaking))
+		} else if new.Items == nil {
+			changes = append(changes, *compare(new.Items, nil, append(path, "items"), Breaking))
+		}
+	}
+
+	// required
+	if c := compareRecursive(old.Required, new.Required, append(path, "required"), []string{}); len(c) > 0 {
+		for i := range c {
+			if c[i].Type == Added && isInput {
+				c[i].Criticality = Breaking
+			}
+		}
+
+		changes = append(changes, c...)
+	}
+
+	// properties
+	changes = append(changes, compareJSONSchemaProperties(options, old.Properties, new.Properties, append(path, "properties"), isInput)...)
+
+	// rest of the fields
+	changes = append(changes, compareRecursive(old, new, path, []string{"required", "items", "type", "$ref", "properties"})...)
+
+	return changes
+}
+
+// compareJSONSchemaProperties compares properties of json schemas
+func compareJSONSchemaProperties(options Options, old, new *openrpc.SchemaMap, path []string, isInput bool) []Change {
+	var changes []Change
+
+	if reflect.DeepEqual(old, new) {
+		return nil
+	}
+
+	if old == nil {
+		return []Change{*compare(nil, new, path, NonBreaking)}
+	}
+
+	if new == nil {
+		return []Change{*compare(old, nil, path, NonBreaking)}
+	}
+
+	index := map[string]bool{}
+	for _, oldSchema := range *old {
+		if newSchema, ok := new.Get(oldSchema.Id); ok {
+			changes = append(changes, compareJSONSchema(options, oldSchema, newSchema, append(path, oldSchema.Id), isInput)...)
+
+			index[newSchema.Id] = true
+		} else {
+			// non-breaking on schema delete
+			changes = append(changes, *compare(oldSchema, nil, append(path, oldSchema.Id), Dangerous))
+		}
+	}
+
+	for _, newSchema := range *new {
+		if index[newSchema.Id] {
+			continue
+		}
+		// non-breaking on method add
+		changes = append(changes, *compare(nil, newSchema, append(path, newSchema.Id), NonBreaking))
+	}
+
+	return changes
+}
+
+// compareRef compares reference objects or reference strings
+func compareRef(options Options, old, new interface{}, path []string) *Change {
+	if reflect.DeepEqual(old, new) {
+		return nil
+	}
+
+	if !sameType(old, new) || isNil(old) || isNil(new) {
+		return compare(old, new, path, Breaking)
+	}
+
+	var oldVal, newVal string
+
+	switch ov := old.(type) {
+	case string:
+		newVal = new.(string)
+		oldVal = ov
+	case openrpc.ReferenceObject:
+		newVal = new.(openrpc.ReferenceObject).Ref
+		oldVal = ov.Ref
+	case *openrpc.ReferenceObject:
+		if nv := new.(*openrpc.ReferenceObject); nv != nil {
+			newVal = nv.Ref
+		}
+		if ov != nil {
+			oldVal = ov.Ref
+		}
+	}
+
+	if oldVal == "" {
+		return compare(nil, newVal, path, Breaking)
+	}
+	if newVal == "" {
+		return compare(oldVal, nil, path, Breaking)
+	}
+
+	return compare(oldVal, newVal, path, Breaking)
+}
+
+// compareRecursive is generic compare function for any type
+func compareRecursive(old, new interface{}, p, exclude []string) []Change {
+	path := make([]string, len(p))
+	copy(path, p)
+
+	var changes []Change
+	if funk.ContainsString(exclude, last(path)) {
+		return nil
+	}
+
+	if isNil(old) != isNil(new) {
+		return []Change{*compare(old, new, path, NonBreaking)}
+	}
+
+	if !sameType(old, new) {
+		changes = append(changes, *compare(old, new, path, NonBreaking))
+	}
+
+	// embed simple types
+	if okOld, oldE := getEmbedSimpleType(old); okOld {
+		if okNew, newE := getEmbedSimpleType(new); okNew {
+			if change := compare(oldE, newE, path, NonBreaking); change != nil {
+				changes = append(changes, *change)
+			}
+
+			return changes
+		}
+	}
+
+	if (isStruct(old) && isStruct(new)) || (isMap(old) && isMap(new)) || (isSlice(old) && isSlice(new)) {
+		oldMap := getMap(old)
+		newMap := getMap(new)
+
+		for oldFieldName, oldFieldVal := range oldMap {
+			if newFieldVal, ok := newMap[oldFieldName]; ok {
+				changes = append(changes, compareRecursive(oldFieldVal, newFieldVal, append(path, oldFieldName), exclude)...)
+
+				delete(newMap, oldFieldName)
+			} else {
+				changes = append(changes, compareRecursive(oldFieldVal, nil, append(path, oldFieldName), exclude)...)
+			}
+		}
+
+		for leftFieldName, leftFieldVal := range newMap {
+			changes = append(changes, compareRecursive(nil, leftFieldVal, append(path, leftFieldName), exclude)...)
+		}
+
+		return changes
+	}
+
+	if change := compare(old, new, path, NonBreaking); change != nil {
+		changes = append(changes, *change)
+	}
+
+	return changes
 }
 
 func getEmbedSimpleType(v interface{}) (bool, interface{}) {
@@ -497,221 +899,89 @@ func getIdentifier(v interface{}) (*string, interface{}) {
 	return nil, nil
 }
 
-func compare(path []string, old, new interface{}) *Change {
+func compare(old, new interface{}, path []string, level CriticalityLevel) *Change {
 	if reflect.DeepEqual(old, new) {
 		return nil
 	}
 
-	for _, c := range changePaths {
-		if matchPath(path, c.pattern) {
-			return c.comp(path, old, new)
-		}
-	}
-
-	return plainCompare(Other)(path, old, new)
-}
-
-func NewChange(path []string, old, new interface{}) *Change {
-	for _, c := range changePaths {
-		if matchPath(path, c.pattern) {
-			return c.comp(path, old, new)
-		}
-	}
-
-	return plainCompare(Other)(path, old, new)
-}
-
-func plainCompare(object ChangeObject) comparerFunc {
-	return func(path []string, from, to interface{}) *Change {
-		var changeType ChangeType
-
-		if isNil(from) {
-			changeType = Added
-		} else if isNil(to) {
-			changeType = Removed
-		} else {
-			changeType = Changed
-		}
-
-		return &Change{
-			Path:        path,
-			Type:        changeType,
-			Object:      object,
-			Criticality: NonBreaking, // everything is not breaking unless out explicitly change it
-			From:        from,
-			To:          to,
-		}
+	return &Change{
+		Path:        path,
+		Type:        detectChangeType(old, new),
+		Object:      detectObjectType(path),
+		Criticality: level,
+		Old:         old,
+		New:         new,
 	}
 }
 
-func strictCompare(object ChangeObject) comparerFunc {
-	return func(path []string, from, to interface{}) *Change {
-		change := plainCompare(object)(path, from, to)
-		switch change.Type {
-		case Removed, Changed:
-			change.Criticality = Breaking
-		}
-
-		return change
-	}
-}
-
-func openrpcCompare(path []string, from, to interface{}) *Change {
-	change := plainCompare(OpenRPCVersion)(path, from, to)
-	change.Criticality = Breaking
-
-	return change
-}
-
-func typeCompare(object ChangeObject) comparerFunc {
-	return func(path []string, from, to interface{}) *Change {
-		change := plainCompare(object)(path, from, to)
-		change.Criticality = Breaking
-		if last(path) == "type" {
-			change.Criticality = simpleTypeCompare(from, to)
-		}
-
-		return change
-	}
-}
-
-func simpleTypeCompare(from, to interface{}) CriticalityLevel {
-	if fs, ok := from.(openrpc.SimpleType); ok {
-		if ts, ok := to.(openrpc.SimpleType); ok {
-			if (fs == "integer" || fs == "int") && (ts == "number" || ts == "float") {
-				return NonBreaking
+func detectObjectType(path []string) ChangeObject {
+	for _, pair := range objectPaths {
+		for pattern, object := range pair {
+			if matchPath(path, pattern) {
+				return object
 			}
 		}
 	}
 
-	return Breaking
+	return Other
 }
 
-func paramsCompare(path []string, from, to interface{}) *Change {
-	if last(path) == "required" {
-		level := NonBreaking
-		if !isTrue(from) && isTrue(to) {
-			level = Breaking
+var objectPaths = []map[string]ChangeObject{
+	{"openrpc": OpenRPCVersion},
+	{"info.version": OpenRPCVersion},
+	{"info": SchemaInfo},
+	{"servers": SchemaServers},
+
+	{"methods.*.paramStructure": MethodParamStructure},
+	{"methods.*.params.*.schema": MethodParamType},
+	{"methods.*.params.*.$ref": MethodParamType},
+	{"methods.*.params": MethodParam},
+
+	{"methods.*.result.type": MethodResultType},
+	{"methods.*.result.$ref": MethodResultType},
+	{"methods.*.result": MethodResult},
+
+	{"methods.*.errors": MethodError},
+
+	{"methods": Method},
+
+	{"components.schemas.*.type": ComponentsSchemaType},
+	{"components.schemas.*.properties.*.type": ComponentsSchemaPropertyType},
+	{"components.schemas.*.properties.*.schema": ComponentsSchemaPropertyType},
+	{"components.schemas.*.properties.*.$ref": ComponentsSchemaPropertyType},
+	{"components.schemas.*.properties": ComponentsSchemaProperty},
+	{"components.schemas": ComponentsSchema},
+
+	{"components.contentDescriptors.*.schema": ComponentsDescriptorType},
+	{"components.contentDescriptors": ComponentsDescriptor},
+}
+
+func matchPath(path []string, pattern string) bool {
+	pp := strings.Split(pattern, ".")
+	if len(path) < len(pp) {
+		return false
+	}
+
+	for i, p := range pp {
+		if p == "*" {
+			continue
 		}
-
-		return &Change{
-			Path:        path,
-			Type:        Changed,
-			Object:      MethodParamRequired,
-			Criticality: level,
-			From:        from,
-			To:          to,
+		if path[i] != p {
+			return false
 		}
 	}
 
-	change := plainCompare(MethodParam)(path, from, to)
-	if change.Type == Added && structs.IsStruct(to) {
-		if toV := structs.Map(to); isTrue(toV["Required"]) {
-			change.Criticality = Breaking
-		}
-	}
-	return change
+	return true
 }
 
-func paramStructureCompare(path []string, from, to interface{}) *Change {
-	var criticality CriticalityLevel
-	toV, ok := to.(openrpc.MethodObjectParamStructure)
-	if !ok || toV == "" {
-		toV = openrpc.MethodObjectParamStructureEnum2
+func detectChangeType(old, new interface{}) ChangeType {
+	if isNil(old) {
+		return Added
+	} else if isNil(new) {
+		return Removed
 	}
 
-	for {
-		if toV == openrpc.MethodObjectParamStructureEnum2 {
-			criticality = NonBreaking
-			break
-		}
-
-		fromV := from.(openrpc.MethodObjectParamStructure)
-		if fromV == openrpc.MethodObjectParamStructureEnum2 {
-			criticality = Dangerous
-			break
-		}
-
-		if fromV != toV {
-			criticality = Breaking
-			break
-		}
-		break
-	}
-
-	return &Change{
-		Path:        path,
-		Type:        Changed,
-		Object:      MethodParamStructure,
-		Criticality: criticality,
-		From:        from,
-		To:          to,
-	}
-}
-
-func methodResultCompare(path []string, from, to interface{}) *Change {
-	// description is changed
-	if last(path) == "description" {
-		return plainCompare(MethodResultDesc)(path, from, to)
-	}
-	// name is changed
-	if last(path) == "name" {
-		return strictCompare(MethodResultName)(path, from, to)
-	}
-
-	// TODO advanced type comparison
-	return strictCompare(MethodResultType)(path, from, to)
-}
-
-func methodErrorCompare(path []string, from, to interface{}) *Change {
-	// message is changed
-	if last(path) == "message" {
-		return plainCompare(MethodErrorMessage)(path, from, to)
-	}
-
-	change := plainCompare(MethodError)(path, from, to)
-	if change.Type == Added {
-		change.Criticality = Dangerous
-	}
-
-	return change
-}
-
-func schemaRequiredCompare(path []string, from, to interface{}) *Change {
-	change := strictCompare(ComponentsSchemaPropertyType)(path, from, to)
-
-	switch change.Type {
-	case Added:
-		change.Criticality = Breaking
-	default:
-		change.Criticality = NonBreaking
-	}
-
-	return change
-}
-
-func schemaPropertyCompare(path []string, from, to interface{}) *Change {
-	// description is changed
-	if last(path) == "description" {
-		return plainCompare(ComponentsSchemaPropertyDesc)(path, from, to)
-	}
-
-	change := strictCompare(ComponentsSchemaPropertyType)(path, from, to)
-	if last(path) == "type" {
-		change.Criticality = simpleTypeCompare(from, to)
-	}
-
-	return change
-}
-
-func schemaDescriptorCompare(path []string, from, to interface{}) *Change {
-	// summary is changed
-	if last(path) == "summary" {
-		return plainCompare(ComponentsDescriptorSummary)(path, from, to)
-	}
-
-	// TODO make different comparison for output objects an input objects
-	return strictCompare(ComponentsDescriptorType)(path, from, to)
+	return Changed
 }
 
 func isNil(v interface{}) bool {
@@ -746,24 +1016,6 @@ func isMap(v interface{}) bool {
 
 func sameType(old, new interface{}) bool {
 	return reflect.TypeOf(old) == reflect.TypeOf(new)
-}
-
-func matchPath(path []string, pattern string) bool {
-	pp := strings.Split(pattern, ".")
-	if len(path) < len(pp) {
-		return false
-	}
-
-	for i, p := range pp {
-		if p == "*" {
-			continue
-		}
-		if path[i] != p {
-			return false
-		}
-	}
-
-	return true
 }
 
 func last(path []string) string {
