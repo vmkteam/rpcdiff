@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
-	"strconv"
 	"strings"
 
 	"github.com/fatih/structs"
@@ -87,68 +86,135 @@ type Change struct {
 }
 
 func (c *Change) String() string {
-	from, _ := json.Marshal(c.Old)
-	to, _ := json.Marshal(c.New)
+	methodName := after(c.Path, "methods")
+	paramName := after(c.Path, "params")
+	schemaName := after(c.Path, "schemas")
+	propName := after(c.Path, "properties")
+	descrName := after(c.Path, "contentDescriptors")
 
-	element, section, stringPath := stringPath(c.Path)
-	if stringPath != "" {
-		stringPath = fmt.Sprintf(": %s", stringPath)
-	}
-
-	switch c.Type {
-	case Added:
-		if _, err := strconv.Atoi(element); err == nil {
-			return fmt.Sprintf("added %s to %s%s", to, section, stringPath)
+	switch c.Object {
+	// method
+	case Method:
+		switch c.Type {
+		case Added:
+			return fmt.Sprintf(`Added method "%s"`, methodName)
+		case Removed:
+			return fmt.Sprintf(`Removed method "%s"`, methodName)
+		case Changed:
+			return fmt.Sprintf(`Changed "%s" at method "%s" from "%v" to "%v"`, last(c.Path), methodName, c.Old, c.New)
+		}
+	// method param structure
+	case MethodParamStructure:
+		return fmt.Sprintf(`Changed "%s" at method "%s" from "%v" to "%v"`, last(c.Path), methodName, c.Old, c.New)
+	// method param
+	case MethodParam:
+		if contains(c.Path, "required") {
+			return fmt.Sprintf(`Set as %s arg "%s" at method "%s"`, requiredString(c.Type, c.Old, c.New), paramName, methodName)
 		}
 
-		return fmt.Sprintf("added %s to %s%s: %s", element, section, stringPath, to)
-	case Removed:
-		if _, err := strconv.Atoi(element); err == nil {
-			return fmt.Sprintf("removed %s from %s%s", from, section, stringPath)
+		switch c.Type {
+		case Added:
+			req := "optional"
+			if c.Criticality == Breaking {
+				req = "required"
+			}
+
+			return fmt.Sprintf(`Added %s arg "%s" to method "%s"`, req, last(c.Path), methodName)
+		case Removed:
+			return fmt.Sprintf(`Removed arg "%s" from method "%s"`, last(c.Path), methodName)
+		case Changed:
+			return fmt.Sprintf(`Changed "%s" at method "%s(%s)" from "%v" to "%v"`, last(c.Path), methodName, paramName, c.Old, c.New)
+		}
+	case MethodParamType:
+		return fmt.Sprintf(`Changed type of arg "%s" at method "%s" from "%v" to "%v"`, paramName, methodName, c.Old, c.New)
+	case MethodResult:
+		if last(c.Path) == "result" {
+			return fmt.Sprintf(`Changed result of method "%s" from "%v" to "%v"`, methodName, c.Old, c.New)
+		}
+		return fmt.Sprintf(`Changed "%s" at result of method "%s" from "%v" to "%v"`, last(c.Path), methodName, c.Old, c.New)
+	case MethodResultType:
+		return fmt.Sprintf(`Changed result type of method "%s" from "%v" to "%v"`, methodName, c.Old, c.New)
+	case MethodError:
+		switch c.Type {
+		case Added:
+			return fmt.Sprintf(`Added error "%s" to method "%s"`, last(c.Path), methodName)
+		case Removed:
+			return fmt.Sprintf(`Removed error "%s" from method "%s"`, last(c.Path), methodName)
+		case Changed:
+			return fmt.Sprintf(`Changed "%s" at error "%s" of method "%s" from "%v" to "%v"`, last(c.Path), after(c.Path, "errors"), methodName, c.Old, c.New)
+		}
+	case ComponentsSchema:
+		if contains(c.Path, "required") {
+			pName := c.New
+			if isNil(c.New) {
+				pName = c.Old
+			}
+
+			return fmt.Sprintf(`Set as %s param "%v" at schema "%s"`, requiredString(c.Type, c.Old, c.New), pName, schemaName)
 		}
 
-		return fmt.Sprintf("removed %s from %s%s: %s", element, section, stringPath, from)
+		switch c.Type {
+		case Added:
+			return fmt.Sprintf(`Added schema "%s"`, schemaName)
+		case Removed:
+			return fmt.Sprintf(`Removed schema "%s"`, schemaName)
+		case Changed:
+			return fmt.Sprintf(`Changed "%s" at schema "%s" from "%v" to "%v"`, last(c.Path), schemaName, c.Old, c.New)
+		}
+	case ComponentsSchemaType:
+		return fmt.Sprintf(`Changed type of schema "%s" from "%v" to "%v"`, schemaName, c.Old, c.New)
+	case ComponentsSchemaProperty:
+		switch c.Type {
+		case Added:
+			return fmt.Sprintf(`Added prop "%s" to schema "%s"`, last(c.Path), schemaName)
+		case Removed:
+			return fmt.Sprintf(`Removed prop "%s" from schema "%s"`, last(c.Path), schemaName)
+		case Changed:
+			return fmt.Sprintf(`Changed "%s" at schema "%s(%s)" from "%v" to "%v"`, last(c.Path), schemaName, propName, c.Old, c.New)
+		}
+	case ComponentsSchemaPropertyType:
+		return fmt.Sprintf(`Changed type of prop "%s" of schema "%s" from "%v" to "%v"`, propName, schemaName, c.Old, c.New)
+	case ComponentsDescriptor:
+		switch c.Type {
+		case Added:
+			return fmt.Sprintf(`Added descriptor "%s"`, descrName)
+		case Removed:
+			return fmt.Sprintf(`Removed descriptor "%s"`, descrName)
+		case Changed:
+			return fmt.Sprintf(`Changed "%s" at descriptor "%s" from "%v" to "%v"`, last(c.Path), descrName, c.Old, c.New)
+		}
+	case ComponentsDescriptorType:
+		return fmt.Sprintf(`Changed type of descriptor "%s" from "%v" to "%v"`, descrName, c.Old, c.New)
 	default:
-		return fmt.Sprintf("changed %s at %s%s: from %s to %s", element, section, stringPath, from, to)
+		switch c.Type {
+		case Added:
+			return fmt.Sprintf(`Added %s "%s"`, last(c.Path), c.Path[0])
+		case Removed:
+			return fmt.Sprintf(`Removed %s from "%s"`, last(c.Path), c.Path[0])
+		case Changed:
+			return fmt.Sprintf(`Changed "%s" at "%s" from "%v" to "%v"`, last(c.Path), c.Path[0], c.Old, c.New)
+		}
 	}
+
+	return ""
 }
 
-func stringPath(path []string) (element, section, stringPath string) {
-	if len(path) == 0 {
-		return
-	}
-	if len(path) == 1 {
-		stringPath = path[0]
-		return
-	}
-
-	section, path = shift(path)
-	element, path = pop(path)
-	stringPath = ""
-
-	if len(path) != 0 {
-		stringPath = strings.Join(path, ".")
+func requiredString(typ ChangeType, from, to interface{}) string {
+	switch typ {
+	case Added:
+		return "required"
+	case Removed:
+		return "not required"
 	}
 
-	switch section {
-	// special path print for methods
-	case "methods":
-		if contains(path, "params") {
-			if last(path) == "params" {
-				element = fmt.Sprintf("%s param", element)
-				stringPath = path[0]
-			}
-			if len(path) > 2 {
-				stringPath = fmt.Sprintf("%s(%s)", path[0], path[2])
-			}
-		}
-		if last(path) == "errors" {
-			element = fmt.Sprintf("%s error", element)
-			stringPath = path[0]
-		}
+	if isTrue(to) {
+		return "required"
+	}
+	if isTrue(from) {
+		return "not required"
 	}
 
-	return
+	return ""
 }
 
 type Diff struct {
@@ -1041,4 +1107,14 @@ func shift(path []string) (string, []string) {
 
 func pop(path []string) (string, []string) {
 	return path[len(path)-1], path[:len(path)-1]
+}
+
+func after(path []string, el string) string {
+	for i, p := range path {
+		if p == el && i+1 < len(path) {
+			return path[i+1]
+		}
+	}
+
+	return ""
 }
