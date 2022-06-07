@@ -49,13 +49,15 @@ const (
 	OpenRPCVersion ChangeObject = "OPEN_RPC_VERSION"
 
 	SchemaInfo    ChangeObject = "SCHEMA_INFO"
+	SchemaVersion ChangeObject = "SCHEMA_VERSION"
 	SchemaServers ChangeObject = "SCHEMA_SERVERS"
 
 	Method               ChangeObject = "METHOD"
 	MethodParamStructure ChangeObject = "METHOD_PARAM_STRUCTURE"
 
-	MethodParam     ChangeObject = "METHOD_PARAM"
-	MethodParamType ChangeObject = "METHOD_PARAM_TYPE" // type + ref + items type + items ref
+	MethodParam                ChangeObject = "METHOD_PARAM"
+	MethodParamType            ChangeObject = "METHOD_PARAM_TYPE" // type + ref + items type + items ref
+	MethodParamTypeDescription ChangeObject = "METHOD_PARAM_TYPE_DESC"
 
 	MethodResult     ChangeObject = "METHOD_RESULT"
 	MethodResultType ChangeObject = "METHOD_RESULT_TYPE" // schema type + ref
@@ -92,6 +94,9 @@ func (c *Change) String() string {
 	propName := after(c.Path, "properties")
 	descrName := after(c.Path, "contentDescriptors")
 
+	oldJSON := toJSON(c.Old)
+	newJSON := toJSON(c.New)
+
 	switch c.Object {
 	// method
 	case Method:
@@ -101,11 +106,11 @@ func (c *Change) String() string {
 		case Removed:
 			return fmt.Sprintf(`Removed method "%s"`, methodName)
 		case Changed:
-			return fmt.Sprintf(`Changed "%s" at method "%s" from "%v" to "%v"`, last(c.Path), methodName, c.Old, c.New)
+			return fmt.Sprintf(`Changed "%s" at method "%s" from %v to %v`, last(c.Path), methodName, oldJSON, newJSON)
 		}
 	// method param structure
 	case MethodParamStructure:
-		return fmt.Sprintf(`Changed "%s" at method "%s" from "%v" to "%v"`, last(c.Path), methodName, c.Old, c.New)
+		return fmt.Sprintf(`Changed "%s" at method "%s" from %v to %v`, last(c.Path), methodName, oldJSON, newJSON)
 	// method param
 	case MethodParam:
 		if contains(c.Path, "required") {
@@ -123,17 +128,23 @@ func (c *Change) String() string {
 		case Removed:
 			return fmt.Sprintf(`Removed arg "%s" from method "%s"`, last(c.Path), methodName)
 		case Changed:
-			return fmt.Sprintf(`Changed "%s" at method "%s(%s)" from "%v" to "%v"`, last(c.Path), methodName, paramName, c.Old, c.New)
+			return fmt.Sprintf(`Changed "%s" at method "%s(%s)" from %v to %v`, last(c.Path), methodName, paramName, oldJSON, newJSON)
 		}
 	case MethodParamType:
-		return fmt.Sprintf(`Changed type of arg "%s" at method "%s" from "%v" to "%v"`, paramName, methodName, c.Old, c.New)
+		if l := last(c.Path); l != "type" && l != "schema" && l != "$ref" && l != "items" {
+			return fmt.Sprintf(`Changed "%s" of type of arg "%s" at method "%s" from %v to %v`, l, paramName, methodName, oldJSON, newJSON)
+		}
+		return fmt.Sprintf(`Changed type of arg "%s" at method "%s" from %v to %v`, paramName, methodName, oldJSON, newJSON)
 	case MethodResult:
 		if last(c.Path) == "result" {
-			return fmt.Sprintf(`Changed result of method "%s" from "%v" to "%v"`, methodName, c.Old, c.New)
+			return fmt.Sprintf(`Changed result of method "%s" from %v to %v`, methodName, oldJSON, newJSON)
 		}
-		return fmt.Sprintf(`Changed "%s" at result of method "%s" from "%v" to "%v"`, last(c.Path), methodName, c.Old, c.New)
+		return fmt.Sprintf(`Changed "%s" at result of method "%s" from %v to %v`, last(c.Path), methodName, oldJSON, newJSON)
 	case MethodResultType:
-		return fmt.Sprintf(`Changed result type of method "%s" from "%v" to "%v"`, methodName, c.Old, c.New)
+		if l := last(c.Path); l != "type" && l != "schema" && l != "$ref" && l != "items" {
+			return fmt.Sprintf(`Changed "%s" of type of result of method "%s" from %v to %v`, l, methodName, oldJSON, newJSON)
+		}
+		return fmt.Sprintf(`Changed result type of method "%s" from %v to %v`, methodName, oldJSON, newJSON)
 	case MethodError:
 		switch c.Type {
 		case Added:
@@ -141,16 +152,20 @@ func (c *Change) String() string {
 		case Removed:
 			return fmt.Sprintf(`Removed error "%s" from method "%s"`, last(c.Path), methodName)
 		case Changed:
-			return fmt.Sprintf(`Changed "%s" at error "%s" of method "%s" from "%v" to "%v"`, last(c.Path), after(c.Path, "errors"), methodName, c.Old, c.New)
+			return fmt.Sprintf(`Changed "%s" at error "%s" of method "%s" from %v to %v`, last(c.Path), after(c.Path, "errors"), methodName, oldJSON, newJSON)
 		}
 	case ComponentsSchema:
 		if contains(c.Path, "required") {
-			pName := c.New
+			pName := newJSON
 			if isNil(c.New) {
-				pName = c.Old
+				pName = oldJSON
 			}
 
-			return fmt.Sprintf(`Set as %s param "%v" at schema "%s"`, requiredString(c.Type, c.Old, c.New), pName, schemaName)
+			if schemaName == "ApiMovie" {
+				fmt.Println("a")
+			}
+
+			return fmt.Sprintf(`Set as %s param %v at schema "%s"`, requiredString(c.Type, c.Old, c.New), pName, schemaName)
 		}
 
 		switch c.Type {
@@ -159,10 +174,13 @@ func (c *Change) String() string {
 		case Removed:
 			return fmt.Sprintf(`Removed schema "%s"`, schemaName)
 		case Changed:
-			return fmt.Sprintf(`Changed "%s" at schema "%s" from "%v" to "%v"`, last(c.Path), schemaName, c.Old, c.New)
+			return fmt.Sprintf(`Changed "%s" at schema "%s" from %v to %v`, last(c.Path), schemaName, oldJSON, newJSON)
 		}
 	case ComponentsSchemaType:
-		return fmt.Sprintf(`Changed type of schema "%s" from "%v" to "%v"`, schemaName, c.Old, c.New)
+		if l := last(c.Path); l != "type" && l != "schema" && l != "$ref" && l != "items" {
+			return fmt.Sprintf(`Changed "%s" of type of schema "%s" from %v to %v`, l, schemaName, oldJSON, newJSON)
+		}
+		return fmt.Sprintf(`Changed type of schema "%s" from %v to %v`, schemaName, oldJSON, newJSON)
 	case ComponentsSchemaProperty:
 		switch c.Type {
 		case Added:
@@ -170,10 +188,13 @@ func (c *Change) String() string {
 		case Removed:
 			return fmt.Sprintf(`Removed prop "%s" from schema "%s"`, last(c.Path), schemaName)
 		case Changed:
-			return fmt.Sprintf(`Changed "%s" at schema "%s(%s)" from "%v" to "%v"`, last(c.Path), schemaName, propName, c.Old, c.New)
+			return fmt.Sprintf(`Changed "%s" at schema "%s(%s)" from %v to %v`, last(c.Path), schemaName, propName, oldJSON, newJSON)
 		}
 	case ComponentsSchemaPropertyType:
-		return fmt.Sprintf(`Changed type of prop "%s" of schema "%s" from "%v" to "%v"`, propName, schemaName, c.Old, c.New)
+		if l := last(c.Path); l != "type" && l != "schema" && l != "$ref" && l != "items" {
+			return fmt.Sprintf(`Changed "%s" of type of prop "%s" of schema "%s" from %v to %v`, l, propName, schemaName, oldJSON, newJSON)
+		}
+		return fmt.Sprintf(`Changed type of prop "%s" of schema "%s" from %v to %v`, propName, schemaName, oldJSON, newJSON)
 	case ComponentsDescriptor:
 		switch c.Type {
 		case Added:
@@ -181,18 +202,21 @@ func (c *Change) String() string {
 		case Removed:
 			return fmt.Sprintf(`Removed descriptor "%s"`, descrName)
 		case Changed:
-			return fmt.Sprintf(`Changed "%s" at descriptor "%s" from "%v" to "%v"`, last(c.Path), descrName, c.Old, c.New)
+			return fmt.Sprintf(`Changed "%s" at descriptor "%s" from %v to %v`, last(c.Path), descrName, oldJSON, newJSON)
 		}
 	case ComponentsDescriptorType:
-		return fmt.Sprintf(`Changed type of descriptor "%s" from "%v" to "%v"`, descrName, c.Old, c.New)
+		if l := last(c.Path); l != "type" && l != "schema" && l != "$ref" && l != "items" {
+			return fmt.Sprintf(`Changed "%s" of type of descriptor "%s" from %v to %v`, l, descrName, oldJSON, newJSON)
+		}
+		return fmt.Sprintf(`Changed type of descriptor "%s" from %v to %v`, descrName, oldJSON, newJSON)
 	default:
 		switch c.Type {
 		case Added:
 			return fmt.Sprintf(`Added %s "%s"`, last(c.Path), c.Path[0])
 		case Removed:
 			return fmt.Sprintf(`Removed %s from "%s"`, last(c.Path), c.Path[0])
-		case Changed:
-			return fmt.Sprintf(`Changed "%s" at "%s" from "%v" to "%v"`, last(c.Path), c.Path[0], c.Old, c.New)
+		default:
+			return fmt.Sprintf(`Changed "%s" at "%s" from %v to %v`, last(c.Path), c.Path[0], oldJSON, newJSON)
 		}
 	}
 
@@ -506,7 +530,17 @@ func compareType(options Options, old, new *openrpc.Type, path []string) *Change
 		level = NonBreaking
 	}
 
-	return compare(old.SimpleType, new.SimpleType, path, level)
+	oldSimpleType := old.SimpleType
+	if oldSimpleType == "" && old.ArrayOfSimpleTypes != nil {
+		oldSimpleType = (*old.ArrayOfSimpleTypes)[0]
+	}
+
+	newSimpleType := new.SimpleType
+	if newSimpleType == "" && new.ArrayOfSimpleTypes != nil {
+		newSimpleType = (*new.ArrayOfSimpleTypes)[0]
+	}
+
+	return compare(oldSimpleType, newSimpleType, path, level)
 }
 
 // compareMethodResults compares results of methods
@@ -572,7 +606,7 @@ func compareComponentsSchemas(options Options, old, new *openrpc.SchemaMap, oldD
 		if newSchema, ok := new.Get(oldSchema.Id); ok {
 			isInput := detectRequiredInput(newSchema.Id, newDoc, []string{}, 0)
 
-			changes = append(changes, compareJSONSchema(options, oldSchema, newSchema, append(path, oldSchema.Id), isInput)...)
+			changes = append(changes, compareJSONSchema(options, getSchemaObject(oldSchema), getSchemaObject(newSchema), append(path, oldSchema.Id), isInput)...)
 
 			index[newSchema.Id] = true
 		} else {
@@ -667,7 +701,7 @@ func compareContentDescriptor(options Options, old, new openrpc.ContentDescripto
 	}
 
 	// schema
-	changes = append(changes, compareJSONSchema(options, *old.Schema, *new.Schema, append(path, "schema"), isInput)...)
+	changes = append(changes, compareJSONSchema(options, getSchemaObject(old.Schema), getSchemaObject(new.Schema), append(path, "schema"), isInput)...)
 
 	// summary
 	if old.Summary != new.Summary {
@@ -683,11 +717,15 @@ func compareContentDescriptor(options Options, old, new openrpc.ContentDescripto
 }
 
 // compareJSONSchema compares any kind of json schema
-func compareJSONSchema(options Options, old, new openrpc.JSONSchema, path []string, isInput bool) []Change {
+func compareJSONSchema(options Options, old, new *openrpc.JSONSchemaObject, path []string, isInput bool) []Change {
 	var changes []Change
 
 	if reflect.DeepEqual(old, new) {
 		return nil
+	}
+
+	if old == nil || new == nil {
+		return []Change{*compare(old, new, path, NonBreaking)}
 	}
 
 	// reference -> schema or schema -> reference
@@ -706,12 +744,14 @@ func compareJSONSchema(options Options, old, new openrpc.JSONSchema, path []stri
 
 	// items
 	if !reflect.DeepEqual(old.Items, new.Items) {
-		if old.Items != nil && new.Items != nil {
-			changes = append(changes, compareJSONSchema(options, *old.Items.JSONSchema, *new.Items.JSONSchema, append(path, "items"), isInput)...)
-		} else if old.Items == nil {
-			changes = append(changes, *compare(nil, new.Items, append(path, "items"), Breaking))
-		} else if new.Items == nil {
-			changes = append(changes, *compare(new.Items, nil, append(path, "items"), Breaking))
+		oldItems, newItems := getSchemaObject(old.Items), getSchemaObject(new.Items)
+
+		if oldItems != nil && newItems != nil {
+			changes = append(changes, compareJSONSchema(options, oldItems, newItems, append(path, "items"), isInput)...)
+		} else if oldItems == nil {
+			changes = append(changes, *compare(nil, newItems, append(path, "items"), Breaking))
+		} else if newItems == nil {
+			changes = append(changes, *compare(oldItems, nil, append(path, "items"), Breaking))
 		}
 	}
 
@@ -754,7 +794,7 @@ func compareJSONSchemaProperties(options Options, old, new *openrpc.SchemaMap, p
 	index := map[string]bool{}
 	for _, oldSchema := range *old {
 		if newSchema, ok := new.Get(oldSchema.Id); ok {
-			changes = append(changes, compareJSONSchema(options, oldSchema, newSchema, append(path, oldSchema.Id), isInput)...)
+			changes = append(changes, compareJSONSchema(options, getSchemaObject(oldSchema), getSchemaObject(newSchema), append(path, oldSchema.Id), isInput)...)
 
 			index[newSchema.Id] = true
 		} else {
@@ -912,7 +952,11 @@ func getMap(v interface{}) map[string]interface{} {
 				}
 			}
 
-			result[fmt.Sprintf("%d", i)] = val
+			if isSimpleType(val) {
+				result[fmt.Sprintf("%v", val)] = val
+			} else {
+				result[fmt.Sprintf("%d", i)] = val
+			}
 		}
 	case reflect.Map:
 		for _, k := range s.MapKeys() {
@@ -994,7 +1038,7 @@ func detectObjectType(path []string) ChangeObject {
 
 var objectPaths = []map[string]ChangeObject{
 	{"openrpc": OpenRPCVersion},
-	{"info.version": OpenRPCVersion},
+	{"info.version": SchemaVersion},
 	{"info": SchemaInfo},
 	{"servers": SchemaServers},
 
@@ -1058,6 +1102,10 @@ func isTrue(v interface{}) bool {
 	return reflect.ValueOf(v).Kind() == reflect.Bool && reflect.ValueOf(v).Bool() == true
 }
 
+func isSimpleType(v interface{}) bool {
+	return !isStruct(v) && !isSlice(v) && !isMap(v)
+}
+
 func isStruct(v interface{}) bool {
 	return structs.IsStruct(v)
 }
@@ -1117,4 +1165,38 @@ func after(path []string, el string) string {
 	}
 
 	return ""
+}
+
+func getSchemaObject(val interface{}) *openrpc.JSONSchemaObject {
+	if isNil(val) {
+		return nil
+	}
+
+	switch v := val.(type) {
+	case openrpc.JSONSchema:
+		return v.JSONSchemaObject
+	case *openrpc.JSONSchema:
+		return v.JSONSchemaObject
+	case openrpc.Items:
+		if v.JSONSchema != nil {
+			return v.JSONSchema.JSONSchemaObject
+		}
+		if v.SchemaArray != nil && len(*v.SchemaArray) > 0 {
+			return (*v.SchemaArray)[0].JSONSchemaObject
+		}
+	case *openrpc.Items:
+		if v.JSONSchema != nil {
+			return v.JSONSchema.JSONSchemaObject
+		}
+		if v.SchemaArray != nil && len(*v.SchemaArray) > 0 {
+			return (*v.SchemaArray)[0].JSONSchemaObject
+		}
+	}
+
+	return nil
+}
+
+func toJSON(val interface{}) string {
+	b, _ := json.Marshal(val)
+	return string(b)
 }
