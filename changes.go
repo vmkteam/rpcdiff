@@ -161,10 +161,6 @@ func (c *Change) String() string {
 				pName = oldJSON
 			}
 
-			if schemaName == "ApiMovie" {
-				fmt.Println("a")
-			}
-
 			return fmt.Sprintf(`Set as %s param %v at schema "%s"`, requiredString(c.Type, c.Old, c.New), pName, schemaName)
 		}
 
